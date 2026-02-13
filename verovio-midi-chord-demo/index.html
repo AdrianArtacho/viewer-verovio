@@ -2,40 +2,71 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Verovio – Chord-wise MIDI Stepping</title>
+<title>Harmony Viewer – Verovio + MIDI</title>
 
 <script src="https://www.verovio.org/javascript/latest/verovio-toolkit.js"></script>
 
 <style>
   body {
-    font-family: sans-serif;
+    font-family: system-ui, sans-serif;
     margin: 20px;
   }
+
   #score svg {
     width: 100%;
   }
+
   .active {
     fill: darkred !important;
     stroke: darkred !important;
+  }
+
+  .controls {
+    margin-bottom: 1em;
   }
 </style>
 </head>
 
 <body>
 
-<h2>Chord-wise stepping (MIDI-triggered)</h2>
-<p>Press any MIDI key to advance one harmonic step.</p>
+<h2>Harmony Viewer (Verovio + MIDI)</h2>
+
+<div class="controls">
+  <button onclick="advanceChord()">Next chord</button>
+  <span id="status"></span>
+</div>
 
 <div id="score"></div>
 
 <script>
-let vrvToolkit = new verovio.toolkit();
+/* ------------------------------
+   URL PARAMETER
+-------------------------------- */
+function getScoreFromURL() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("score") || "demo2.musicxml";
+}
+
+const scorePath = getScoreFromURL();
+console.log("Loading score:", scorePath);
+document.getElementById("status").textContent =
+  "Score: " + scorePath;
+
+/* ------------------------------
+   VEROVIO SETUP
+-------------------------------- */
+const vrvToolkit = new verovio.toolkit();
 let chordGroups = [];
 let currentChord = 0;
 
-// --- Load score ---
-fetch("demo2.musicxml")
-  .then(r => r.text())
+/* ------------------------------
+   LOAD SCORE
+-------------------------------- */
+fetch(scorePath)
+  .then(r => {
+    console.log("Fetching:", r.url);
+    return r.text();
+  })
   .then(xml => {
     vrvToolkit.setOptions({
       scale: 40,
@@ -48,36 +79,76 @@ fetch("demo2.musicxml")
 
     buildChordGroups();
     highlightCurrentChord();
+  })
+  .catch(err => {
+    console.error("Failed to load score:", err);
+    document.getElementById("status").textContent =
+      "Error loading score.";
   });
 
-// --- Group notes by onset ---
+/* ------------------------------
+   GROUP NOTES INTO CHORDS
+-------------------------------- */
 function buildChordGroups() {
-  const notes = Array.from(
-    document.querySelectorAll(".note")
+  chordGroups = [];
+
+  const layers = Array.from(
+    document.querySelectorAll(".layer")
   );
 
-  const groups = {};
+  layers.forEach(layer => {
+    const elements = Array.from(layer.children);
 
-  notes.forEach(note => {
-    // onset key = measure + timestamp
-    const measure = note.getAttribute("data-measure");
-    const startid = note.getAttribute("data-startid");
-    const key = `${measure}-${startid}`;
+    elements.forEach(el => {
 
-    if (!groups[key]) {
-      groups[key] = [];
-    }
-    groups[key].push(note);
+      // --- CHORD ---
+      if (el.classList.contains("chord")) {
+        const noteheads = Array.from(
+          el.querySelectorAll(".notehead")
+        );
+        if (noteheads.length > 0) {
+          chordGroups.push(noteheads);
+        }
+      }
+
+      // --- STANDALONE NOTE ---
+      else if (el.classList.contains("note")) {
+        const notehead = el.querySelector(".notehead");
+        if (notehead) {
+          chordGroups.push([notehead]);
+        }
+      }
+
+      // --- BEAM (multiple notes) ---
+      else if (el.classList.contains("beam")) {
+        const notes = Array.from(
+          el.querySelectorAll(".note")
+        );
+
+        notes.forEach(note => {
+          const notehead = note.querySelector(".notehead");
+          if (notehead) {
+            chordGroups.push([notehead]);
+          }
+        });
+      }
+
+      // --- REST (optional: ignore for now) ---
+      // else if (el.classList.contains("rest")) { }
+    });
   });
 
-  // preserve score order
-  chordGroups = Object.values(groups);
+  console.log("Total musical steps:", chordGroups.length);
 }
 
-// --- Highlight logic ---
+
+
+/* ------------------------------
+   HIGHLIGHTING
+-------------------------------- */
 function highlightCurrentChord() {
   document
-    .querySelectorAll(".note")
+    .querySelectorAll(".notehead")
     .forEach(n => n.classList.remove("active"));
 
   if (!chordGroups[currentChord]) return;
@@ -87,7 +158,12 @@ function highlightCurrentChord() {
   );
 }
 
-// --- Advance ---
+
+
+
+/* ------------------------------
+   ADVANCE LOGIC
+-------------------------------- */
 function advanceChord() {
   if (currentChord < chordGroups.length - 1) {
     currentChord++;
@@ -95,18 +171,30 @@ function advanceChord() {
   }
 }
 
-// --- MIDI ---
+/* ------------------------------
+   MIDI INPUT
+-------------------------------- */
 if (navigator.requestMIDIAccess) {
   navigator.requestMIDIAccess().then(midi => {
+    console.log("MIDI access granted");
+
     for (let input of midi.inputs.values()) {
+      console.log("MIDI input:", input.name);
+
       input.onmidimessage = msg => {
+        console.log("MIDI message:", msg.data);
+
         const [status, note, velocity] = msg.data;
         if (status === 144 && velocity > 0) {
           advanceChord();
         }
       };
     }
+  }).catch(err => {
+    console.error("MIDI access failed:", err);
   });
+} else {
+  console.error("Web MIDI not supported");
 }
 </script>
 

@@ -50,6 +50,9 @@ fetch("demo.musicxml")
     highlightCurrent();
   });
 
+console.log("Loaded index.html from:", window.location.href);
+
+
 // Collect SVG note elements
 function collectNotes() {
   const svg = document.querySelector("#score svg");
