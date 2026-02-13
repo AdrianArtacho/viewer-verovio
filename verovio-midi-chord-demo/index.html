@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Harmony Viewer – Stable HTML Overlay</title>
+<title>Harmony Viewer – Stable HTML Overlay (Refined)</title>
 
 <script src="https://www.verovio.org/javascript/latest/verovio-toolkit.js"></script>
 
@@ -25,29 +25,33 @@
     width: 100%;
   }
 
+  /* Highlight active notes */
   .active {
     fill: red !important;
     stroke: red !important;
   }
 
-  /* ===== HTML analysis overlay ===== */
+  /* ===== Analysis overlay ===== */
   #analysis-overlay {
     position: absolute;
     pointer-events: none;
     text-align: center;
     transform: translateX(-50%);
+    white-space: nowrap;
   }
 
   .analysis-stufe {
-    font-family: "Times New Roman", serif;
+    font-family: "Times New Roman", "Palatino Linotype", serif;
     font-size: 28px;
     font-weight: bold;
+    line-height: 1.1;
   }
 
   .analysis-function {
     font-family: system-ui, sans-serif;
     font-size: 16px;
     letter-spacing: 0.05em;
+    line-height: 1.1;
   }
 </style>
 </head>
@@ -62,6 +66,7 @@
 
 <div id="viewer">
   <div id="score"></div>
+
   <div id="analysis-overlay" style="display:none">
     <div class="analysis-stufe"></div>
     <div class="analysis-function"></div>
@@ -76,6 +81,7 @@ const vrvToolkit = new verovio.toolkit();
 let steps = [];
 let currentStep = 0;
 let analysisData = null;
+let globalBaselineY = null;
 
 /* ==============================
    URL PARAMETERS
@@ -94,7 +100,9 @@ fetch(scorePath)
     vrvToolkit.setOptions({
       scale: 40,
       pageHeight: 1000,
-      pageWidth: 2000
+      pageWidth: 2000,
+      footer: "none",
+      header: "none"
     });
 
     document.getElementById("score").innerHTML =
@@ -105,7 +113,7 @@ fetch(scorePath)
   });
 
 /* ==============================
-   LOAD ANALYSIS
+   LOAD ANALYSIS (OPTIONAL)
 ============================== */
 fetch(analysisPath)
   .then(r => r.json())
@@ -113,7 +121,9 @@ fetch(analysisPath)
     analysisData = json;
     renderStep();
   })
-  .catch(() => console.log("No analysis JSON (ok)"));
+  .catch(() => {
+    console.log("No analysis JSON (ok)");
+  });
 
 /* ==============================
    BUILD MUSICAL STEPS
@@ -145,10 +155,11 @@ function buildSteps() {
 }
 
 /* ==============================
-   RENDER STEP
+   RENDER CURRENT STEP
 ============================== */
 function renderStep() {
-  document.querySelectorAll(".notehead")
+  document
+    .querySelectorAll(".notehead")
     .forEach(n => n.classList.remove("active"));
 
   const notes = steps[currentStep];
@@ -164,6 +175,7 @@ function renderStep() {
 ============================== */
 function renderAnalysisHTML(notes) {
   const overlay = document.getElementById("analysis-overlay");
+  const viewer = document.getElementById("viewer");
 
   if (!analysisData || !analysisData.steps) {
     overlay.style.display = "none";
@@ -176,7 +188,7 @@ function renderAnalysisHTML(notes) {
     return;
   }
 
-  // Compute bounding box in SCREEN coordinates
+  // --- Screen-space bounding box of current notes
   let minX = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
@@ -188,11 +200,19 @@ function renderAnalysisHTML(notes) {
     maxY = Math.max(maxY, r.bottom);
   });
 
-  const centerX = (minX + maxX) / 2;
-  const topY = maxY + 6;
+  const centerX_screen = (minX + maxX) / 2;
+
+  // --- Convert screen → viewer-local coordinates
+  const viewerRect = viewer.getBoundingClientRect();
+  const centerX = centerX_screen - viewerRect.left;
+
+  // --- Establish a single global vertical baseline
+  if (globalBaselineY === null) {
+    globalBaselineY = maxY - viewerRect.top + 10;
+  }
 
   overlay.style.left = `${centerX}px`;
-  overlay.style.top = `${topY}px`;
+  overlay.style.top = `${globalBaselineY}px`;
   overlay.style.display = "block";
 
   overlay.querySelector(".analysis-stufe").textContent = step.stufe;
@@ -201,7 +221,7 @@ function renderAnalysisHTML(notes) {
 }
 
 /* ==============================
-   ADVANCE
+   ADVANCE STEP
 ============================== */
 function advanceStep() {
   if (currentStep < steps.length - 1) {
@@ -211,14 +231,16 @@ function advanceStep() {
 }
 
 /* ==============================
-   MIDI
+   MIDI INPUT
 ============================== */
 if (navigator.requestMIDIAccess) {
   navigator.requestMIDIAccess().then(midi => {
     for (let input of midi.inputs.values()) {
       input.onmidimessage = msg => {
         const [status, , vel] = msg.data;
-        if (status === 144 && vel > 0) advanceStep();
+        if (status === 144 && vel > 0) {
+          advanceStep();
+        }
       };
     }
   });
