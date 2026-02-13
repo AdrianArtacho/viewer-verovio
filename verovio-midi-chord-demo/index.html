@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Harmony Viewer – Verovio + MIDI</title>
+<title>Harmony Viewer – Verovio + MIDI + Analysis</title>
 
 <script src="https://www.verovio.org/javascript/latest/verovio-toolkit.js"></script>
 
@@ -17,56 +17,66 @@
   }
 
   .active {
-    fill: darkred !important;
-    stroke: darkred !important;
+    filter: brightness(0.8);
   }
 
   .controls {
     margin-bottom: 1em;
+  }
+
+  #analysis {
+    margin-top: 1em;
+    font-size: 1.2em;
+    font-weight: bold;
   }
 </style>
 </head>
 
 <body>
 
-<h2>Harmony Viewer (Verovio + MIDI)</h2>
+<h2>Harmony Viewer</h2>
 
 <div class="controls">
-  <button onclick="advanceChord()">Next chord</button>
+  <button onclick="advanceStep()">Next</button>
   <span id="status"></span>
 </div>
 
 <div id="score"></div>
+<div id="analysis"></div>
 
 <script>
-/* ------------------------------
-   URL PARAMETER
--------------------------------- */
-function getScoreFromURL() {
+/* ==============================
+   URL PARAMETERS
+============================== */
+function getURLParam(name) {
   const params = new URLSearchParams(window.location.search);
-  return params.get("score") || "demo2.musicxml";
+  return params.get(name);
 }
 
-const scorePath = getScoreFromURL();
-console.log("Loading score:", scorePath);
-document.getElementById("status").textContent =
-  "Score: " + scorePath;
+function deriveAnalysisPath(scorePath) {
+  return scorePath.replace(/\.musicxml$/i, ".json");
+}
 
-/* ------------------------------
-   VEROVIO SETUP
--------------------------------- */
+const scorePath = getURLParam("score") || "demo2.musicxml";
+const analysisPath =
+  getURLParam("analysis") || deriveAnalysisPath(scorePath);
+
+document.getElementById("status").textContent =
+  `Score: ${scorePath}`;
+
+/* ==============================
+   GLOBAL STATE
+============================== */
 const vrvToolkit = new verovio.toolkit();
 let chordGroups = [];
-let currentChord = 0;
+let currentStep = 0;
+let analysisData = null;
 
-/* ------------------------------
+/* ==============================
    LOAD SCORE
--------------------------------- */
+============================== */
 fetch(scorePath)
-  .then(r => {
-    console.log("Fetching:", r.url);
-    return r.text();
-  })
+  .then(r => r.text())
   .then(xml => {
     vrvToolkit.setOptions({
       scale: 40,
@@ -78,17 +88,32 @@ fetch(scorePath)
       vrvToolkit.renderData(xml, {});
 
     buildChordGroups();
-    highlightCurrentChord();
+    highlightCurrentStep();
   })
   .catch(err => {
-    console.error("Failed to load score:", err);
-    document.getElementById("status").textContent =
-      "Error loading score.";
+    console.error("Score load error:", err);
   });
 
-/* ------------------------------
-   GROUP NOTES INTO CHORDS
--------------------------------- */
+/* ==============================
+   LOAD ANALYSIS (OPTIONAL)
+============================== */
+fetch(analysisPath)
+  .then(r => {
+    if (!r.ok) throw new Error("No analysis file");
+    return r.json();
+  })
+  .then(json => {
+    analysisData = json;
+    console.log("Analysis loaded:", analysisData);
+    applyAnalysis();
+  })
+  .catch(() => {
+    console.log("No analysis JSON found");
+  });
+
+/* ==============================
+   BUILD MUSICAL STEPS
+============================== */
 function buildChordGroups() {
   chordGroups = [];
 
@@ -101,7 +126,7 @@ function buildChordGroups() {
 
     elements.forEach(el => {
 
-      // --- CHORD ---
+      // CHORD (simultaneity)
       if (el.classList.contains("chord")) {
         const noteheads = Array.from(
           el.querySelectorAll(".notehead")
@@ -111,7 +136,7 @@ function buildChordGroups() {
         }
       }
 
-      // --- STANDALONE NOTE ---
+      // STANDALONE NOTE
       else if (el.classList.contains("note")) {
         const notehead = el.querySelector(".notehead");
         if (notehead) {
@@ -119,12 +144,11 @@ function buildChordGroups() {
         }
       }
 
-      // --- BEAM (multiple notes) ---
+      // BEAM → multiple notes
       else if (el.classList.contains("beam")) {
         const notes = Array.from(
           el.querySelectorAll(".note")
         );
-
         notes.forEach(note => {
           const notehead = note.querySelector(".notehead");
           if (notehead) {
@@ -133,68 +157,87 @@ function buildChordGroups() {
         });
       }
 
-      // --- REST (optional: ignore for now) ---
-      // else if (el.classList.contains("rest")) { }
+      // RESTS IGNORED (for now)
     });
   });
 
   console.log("Total musical steps:", chordGroups.length);
 }
 
-
-
-/* ------------------------------
+/* ==============================
    HIGHLIGHTING
--------------------------------- */
-function highlightCurrentChord() {
+============================== */
+function highlightCurrentStep() {
   document
     .querySelectorAll(".notehead")
-    .forEach(n => n.classList.remove("active"));
+    .forEach(n => {
+      n.classList.remove("active");
+      n.style.fill = "";
+      n.style.stroke = "";
+    });
 
-  if (!chordGroups[currentChord]) return;
+  if (!chordGroups[currentStep]) return;
 
-  chordGroups[currentChord].forEach(n =>
+  chordGroups[currentStep].forEach(n =>
     n.classList.add("active")
   );
+
+  applyAnalysis();
 }
 
+/* ==============================
+   ANALYSIS APPLICATION
+============================== */
+function applyAnalysis() {
+  if (!analysisData || !analysisData.steps) return;
 
+  const step = analysisData.steps[currentStep];
+  if (!step) return;
 
+  const color = step.color || "darkred";
 
-/* ------------------------------
-   ADVANCE LOGIC
--------------------------------- */
-function advanceChord() {
-  if (currentChord < chordGroups.length - 1) {
-    currentChord++;
-    highlightCurrentChord();
+  chordGroups[currentStep].forEach(n => {
+    n.style.fill = color;
+    n.style.stroke = color;
+  });
+
+  updateAnalysisLabel(step);
+}
+
+function updateAnalysisLabel(step) {
+  const el = document.getElementById("analysis");
+  if (!el) return;
+
+  el.textContent =
+    step.stufe
+      ? `${step.stufe}${step.function ? " – " + step.function : ""}`
+      : "";
+}
+
+/* ==============================
+   STEP ADVANCE
+============================== */
+function advanceStep() {
+  if (currentStep < chordGroups.length - 1) {
+    currentStep++;
+    highlightCurrentStep();
   }
 }
 
-/* ------------------------------
+/* ==============================
    MIDI INPUT
--------------------------------- */
+============================== */
 if (navigator.requestMIDIAccess) {
   navigator.requestMIDIAccess().then(midi => {
-    console.log("MIDI access granted");
-
     for (let input of midi.inputs.values()) {
-      console.log("MIDI input:", input.name);
-
       input.onmidimessage = msg => {
-        console.log("MIDI message:", msg.data);
-
-        const [status, note, velocity] = msg.data;
+        const [status, , velocity] = msg.data;
         if (status === 144 && velocity > 0) {
-          advanceChord();
+          advanceStep();
         }
       };
     }
-  }).catch(err => {
-    console.error("MIDI access failed:", err);
   });
-} else {
-  console.error("Web MIDI not supported");
 }
 </script>
 
