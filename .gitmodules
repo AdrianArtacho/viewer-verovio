@@ -1,0 +1,3 @@
+[submodule "verovio4live"]
+	path = verovio4live
+	url = https://github.com/AdrianArtacho/verovio4live.git
