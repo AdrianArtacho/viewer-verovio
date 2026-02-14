@@ -1,0 +1,39 @@
+/* viewer.css */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: white;
+  font-family: sans-serif;
+}
+
+#viewer-root {
+  position: relative;
+  width: 100%;
+  height: auto;
+  overflow: hidden;
+}
+
+#score {
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Optional title */
+#title {
+  text-align: center;
+  font-size: 1.5em;
+  margin: 0.5em 0;
+}
+
+/* Debug button (hidden unless debug=yes) */
+#debug-controls {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 10;
+}
