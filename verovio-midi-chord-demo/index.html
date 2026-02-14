@@ -25,13 +25,11 @@
     width: 100%;
   }
 
-  /* Highlight active notes */
   .active {
     fill: red !important;
     stroke: red !important;
   }
 
-  /* ===== Analysis overlay ===== */
   #analysis-overlay {
     position: absolute;
     pointer-events: none;
@@ -44,14 +42,12 @@
     font-family: "Times New Roman", "Palatino Linotype", serif;
     font-size: 28px;
     font-weight: bold;
-    line-height: 1.1;
   }
 
   .analysis-function {
     font-family: system-ui, sans-serif;
     font-size: 16px;
     letter-spacing: 0.05em;
-    line-height: 1.1;
   }
 </style>
 </head>
@@ -66,7 +62,6 @@
 
 <div id="viewer">
   <div id="score"></div>
-
   <div id="analysis-overlay" style="display:none">
     <div class="analysis-stufe"></div>
     <div class="analysis-function"></div>
@@ -75,11 +70,21 @@
 
 <script>
 /* =====================================================
-   CONFIG
+   URL PARAMETERS / CONFIG
 ===================================================== */
-const CC_STEP_SELECT = 22;   // CC number used by Max
-const MIDI_CHANNEL  = 0;    // 0 = channel 1
-const CC_STEP_COUNT = 23; // browser → Max: number of steps
+const params = new URLSearchParams(window.location.search);
+
+const SCORE_PATH   = params.get("score")    || "demo2.musicxml";
+const ANALYSIS_PATH= params.get("analysis") || SCORE_PATH.replace(/\.musicxml$/i, ".json");
+
+const CC_STEP_SELECT = parseInt(params.get("ccSelect") || "22", 10);
+const CC_STEP_COUNT  = parseInt(params.get("ccCount")  || "23", 10);
+
+const MIDI_CHANNEL_1BASED = parseInt(params.get("midiChan") || "1", 10);
+const MIDI_CHANNEL = Math.max(0, MIDI_CHANNEL_1BASED - 1);
+
+const MIDI_IN_MATCH  = params.get("midiIn")  || "Max→Browser";
+const MIDI_OUT_MATCH = params.get("midiOut") || "Browser→Max";
 
 /* =====================================================
    GLOBAL STATE
@@ -89,37 +94,23 @@ const vrvToolkit = new verovio.toolkit();
 let steps = [];
 let currentStep = 0;
 let analysisData = null;
-
 let globalBaselineY = null;
 
-// MIDI
 let midiOut = null;
 let lastPlayedNotes = [];
 
 /* =====================================================
-   URL PARAMETERS
-===================================================== */
-const params = new URLSearchParams(window.location.search);
-const scorePath = params.get("score") || "demo2.musicxml";
-const analysisPath =
-  params.get("analysis") || scorePath.replace(/\.musicxml$/i, ".json");
-
-/* =====================================================
    LOAD SCORE
 ===================================================== */
-fetch(scorePath)
+fetch(SCORE_PATH)
   .then(r => r.text())
   .then(xml => {
     vrvToolkit.setOptions({
       scale: 40,
       pageHeight: 1000,
       pageWidth: 2000,
-      footer: "none",
-
-      // 🔴 REQUIRED for MIDI pitch extraction
-      svgAdditionalAttributes: true
+      footer: "none"
     });
-
 
     document.getElementById("score").innerHTML =
       vrvToolkit.renderData(xml, {});
@@ -131,7 +122,7 @@ fetch(scorePath)
 /* =====================================================
    LOAD ANALYSIS (OPTIONAL)
 ===================================================== */
-fetch(analysisPath)
+fetch(ANALYSIS_PATH)
   .then(r => r.json())
   .then(json => {
     analysisData = json;
@@ -152,12 +143,10 @@ function buildSteps() {
         const nh = el.querySelectorAll(".notehead");
         if (nh.length) steps.push([...nh]);
       }
-
       else if (el.classList.contains("note")) {
         const nh = el.querySelector(".notehead");
         if (nh) steps.push([nh]);
       }
-
       else if (el.classList.contains("beam")) {
         el.querySelectorAll(".note").forEach(n => {
           const nh = n.querySelector(".notehead");
@@ -171,7 +160,7 @@ function buildSteps() {
 }
 
 /* =====================================================
-   RENDER CURRENT STEP
+   RENDER STEP
 ===================================================== */
 function renderStep() {
   document.querySelectorAll(".notehead")
@@ -187,7 +176,7 @@ function renderStep() {
 }
 
 /* =====================================================
-   HTML ANALYSIS OVERLAY
+   ANALYSIS OVERLAY
 ===================================================== */
 function renderAnalysisHTML(notes) {
   const overlay = document.getElementById("analysis-overlay");
@@ -204,9 +193,7 @@ function renderAnalysisHTML(notes) {
     return;
   }
 
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
+  let minX = Infinity, maxX = -Infinity, maxY = -Infinity;
 
   notes.forEach(n => {
     const r = n.getBoundingClientRect();
@@ -215,12 +202,10 @@ function renderAnalysisHTML(notes) {
     maxY = Math.max(maxY, r.bottom);
   });
 
-  const centerX_screen = (minX + maxX) / 2;
-  const viewerRect = viewer.getBoundingClientRect();
-  const centerX = centerX_screen - viewerRect.left;
+  const centerX = (minX + maxX) / 2 - viewer.getBoundingClientRect().left;
 
   if (globalBaselineY === null) {
-    globalBaselineY = maxY - viewerRect.top + 10;
+    globalBaselineY = maxY - viewer.getBoundingClientRect().top + 10;
   }
 
   overlay.style.left = `${centerX}px`;
@@ -228,12 +213,11 @@ function renderAnalysisHTML(notes) {
   overlay.style.display = "block";
 
   overlay.querySelector(".analysis-stufe").textContent = step.stufe;
-  overlay.querySelector(".analysis-function").textContent =
-    step.function || "";
+  overlay.querySelector(".analysis-function").textContent = step.function || "";
 }
 
 /* =====================================================
-   MIDI PITCH EXTRACTION
+   PITCH VIA VEROVIO TOOLKIT (CORRECT WAY)
 ===================================================== */
 function getMidiPitch(notehead) {
   const note = notehead.closest(".note");
@@ -242,60 +226,39 @@ function getMidiPitch(notehead) {
   const xmlId = note.getAttribute("id");
   if (!xmlId) return null;
 
-  const attrs = vrvToolkit.getElementAttr(xmlId);
-  if (!attrs) return null;
+  const a = vrvToolkit.getElementAttr(xmlId);
+  if (!a || !a.pname || a.oct === undefined) return null;
 
-  const pname = attrs.pname;
-  const oct   = parseInt(attrs.oct, 10);
-  const alter = parseInt(attrs.accid || "0", 10);
+  const pc = { c:0, d:2, e:4, f:5, g:7, a:9, b:11 }[a.pname];
+  const oct = parseInt(a.oct, 10);
+  const alter = parseInt(a.accid || "0", 10);
 
-  if (!pname || isNaN(oct)) return null;
-
-  const pc = { c:0, d:2, e:4, f:5, g:7, a:9, b:11 }[pname];
-  if (pc === undefined) return null;
-
-  // MIDI note number (C4 = 60)
   return pc + alter + (oct + 1) * 12;
 }
 
+/* =====================================================
+   MIDI OUTPUT HELPERS
+===================================================== */
+function sendNoteOn(p, v = 90) {
+  if (!midiOut) return;
+  midiOut.send([0x90 | MIDI_CHANNEL, p, v]);
+}
 
+function sendNoteOff(p) {
+  if (!midiOut) return;
+  midiOut.send([0x80 | MIDI_CHANNEL, p, 0]);
+}
+
+function sendCC(cc, value) {
+  if (!midiOut) return;
+  midiOut.send([0xB0 | MIDI_CHANNEL, cc, Math.max(0, Math.min(127, value))]);
+}
 
 /* =====================================================
-   MIDI PLAYBACK
+   PLAYBACK
 ===================================================== */
-function sendNoteOn(pitch, vel = 90) {
-  if (!midiOut) {
-    console.warn("NOTE ON skipped (no midiOut)", pitch);
-    return;
-  }
-
-  console.log(
-    "%cNOTE ON",
-    "color: green; font-weight: bold;",
-    "pitch =", pitch,
-    "channel =", MIDI_CHANNEL + 1,
-    "via =", midiOut.name
-  );
-
-  midiOut.send([0x90 | MIDI_CHANNEL, pitch, vel]);
-}
-
-
-function sendNoteOff(pitch) {
-  if (!midiOut) return;
-
-  console.log(
-    "%cNOTE OFF",
-    "color: gray;",
-    "pitch =", pitch,
-    "via =", midiOut.name
-  );
-
-  midiOut.send([0x80 | MIDI_CHANNEL, pitch, 0]);
-}
-
 function stopLastNotes() {
-  lastPlayedNotes.forEach(p => sendNoteOff(p));
+  lastPlayedNotes.forEach(sendNoteOff);
   lastPlayedNotes = [];
 }
 
@@ -305,23 +268,17 @@ function playCurrentStep() {
   const notes = steps[currentStep];
   if (!notes) return;
 
-  console.group("PLAY STEP", currentStep);
-
   notes.forEach(nh => {
-    const pitch = getMidiPitch(nh);
-    console.log("notehead → MIDI pitch:", pitch);
-    if (pitch !== null) {
-      sendNoteOn(pitch);
-      lastPlayedNotes.push(pitch);
+    const p = getMidiPitch(nh);
+    if (p !== null) {
+      sendNoteOn(p);
+      lastPlayedNotes.push(p);
     }
   });
-
-  console.groupEnd();
 }
 
-
 /* =====================================================
-   ADVANCE (DEBUG BUTTON)
+   DEBUG ADVANCE
 ===================================================== */
 function advanceStep() {
   if (currentStep < steps.length - 1) {
@@ -331,26 +288,18 @@ function advanceStep() {
 }
 
 /* =====================================================
-   MIDI INPUT / OUTPUT
+   MIDI IN / OUT SETUP
 ===================================================== */
 if (navigator.requestMIDIAccess) {
   navigator.requestMIDIAccess().then(midi => {
 
-    // -------- MIDI INPUT (Max → Browser) --------
     for (let input of midi.inputs.values()) {
-      console.log("MIDI IN:", input.name);
-
-      if (input.name.includes("Max→Browser")) {
+      if (input.name.includes(MIDI_IN_MATCH)) {
         console.log("BOUND INPUT:", input.name);
-
         input.onmidimessage = msg => {
-          const [status, data1, data2] = msg.data;
-          const type = status & 0xF0;
-          const chan = status & 0x0F;
-
-          // CC on channel 1
-          if (type === 0xB0 && chan === 0 && data1 === 22) {
-            const idx = data2 - 1;
+          const [st, d1, d2] = msg.data;
+          if ((st & 0xF0) === 0xB0 && (st & 0x0F) === MIDI_CHANNEL && d1 === CC_STEP_SELECT) {
+            const idx = d2 - 1;
             if (idx >= 0 && idx < steps.length) {
               currentStep = idx;
               renderStep();
@@ -360,23 +309,18 @@ if (navigator.requestMIDIAccess) {
       }
     }
 
-    // -------- MIDI OUTPUT (Browser → Max) --------
     for (let output of midi.outputs.values()) {
-      console.log("MIDI OUT:", output.name);
-
-      if (output.name.includes("Browser→Max")) {
+      if (output.name.includes(MIDI_OUT_MATCH)) {
         midiOut = output;
         console.log("BOUND OUTPUT:", output.name);
-      }
-    }
 
-    if (!midiOut) {
-      console.error("❌ No Browser→Max MIDI OUT bound");
+        // 🔴 announce step count once output exists
+        sendCC(CC_STEP_COUNT, steps.length);
+        console.log("Sent step count:", steps.length);
+      }
     }
   });
 }
-
-
 </script>
 
 </body>
