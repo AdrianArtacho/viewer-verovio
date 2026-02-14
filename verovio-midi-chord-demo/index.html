@@ -74,8 +74,8 @@
 ===================================================== */
 const params = new URLSearchParams(window.location.search);
 
-const SCORE_PATH   = params.get("score")    || "demo2.musicxml";
-const ANALYSIS_PATH= params.get("analysis") || SCORE_PATH.replace(/\.musicxml$/i, ".json");
+const SCORE_PATH    = params.get("score")    || "demo2.musicxml";
+const ANALYSIS_PATH = params.get("analysis") || SCORE_PATH.replace(/\.musicxml$/i, ".json");
 
 const CC_STEP_SELECT = parseInt(params.get("ccSelect") || "22", 10);
 const CC_STEP_COUNT  = parseInt(params.get("ccCount")  || "23", 10);
@@ -99,6 +99,10 @@ let globalBaselineY = null;
 let midiOut = null;
 let lastPlayedNotes = [];
 
+/* readiness handshake */
+let stepsReady = false;
+let midiReady  = false;
+
 /* =====================================================
    LOAD SCORE
 ===================================================== */
@@ -116,6 +120,9 @@ fetch(SCORE_PATH)
       vrvToolkit.renderData(xml, {});
 
     buildSteps();
+    stepsReady = true;
+    maybeSendStepCount();
+
     renderStep();
   });
 
@@ -217,7 +224,7 @@ function renderAnalysisHTML(notes) {
 }
 
 /* =====================================================
-   PITCH VIA VEROVIO TOOLKIT (CORRECT WAY)
+   PITCH VIA VEROVIO TOOLKIT (AUTHORITATIVE)
 ===================================================== */
 function getMidiPitch(notehead) {
   const note = notehead.closest(".note");
@@ -278,6 +285,16 @@ function playCurrentStep() {
 }
 
 /* =====================================================
+   STEP COUNT HANDSHAKE
+===================================================== */
+function maybeSendStepCount() {
+  if (!stepsReady || !midiReady) return;
+
+  sendCC(CC_STEP_COUNT, steps.length);
+  console.log("Sent step count:", steps.length);
+}
+
+/* =====================================================
    DEBUG ADVANCE
 ===================================================== */
 function advanceStep() {
@@ -298,7 +315,10 @@ if (navigator.requestMIDIAccess) {
         console.log("BOUND INPUT:", input.name);
         input.onmidimessage = msg => {
           const [st, d1, d2] = msg.data;
-          if ((st & 0xF0) === 0xB0 && (st & 0x0F) === MIDI_CHANNEL && d1 === CC_STEP_SELECT) {
+          if ((st & 0xF0) === 0xB0 &&
+              (st & 0x0F) === MIDI_CHANNEL &&
+              d1 === CC_STEP_SELECT) {
+
             const idx = d2 - 1;
             if (idx >= 0 && idx < steps.length) {
               currentStep = idx;
@@ -312,11 +332,9 @@ if (navigator.requestMIDIAccess) {
     for (let output of midi.outputs.values()) {
       if (output.name.includes(MIDI_OUT_MATCH)) {
         midiOut = output;
+        midiReady = true;
         console.log("BOUND OUTPUT:", output.name);
-
-        // 🔴 announce step count once output exists
-        sendCC(CC_STEP_COUNT, steps.length);
-        console.log("Sent step count:", steps.length);
+        maybeSendStepCount();
       }
     }
   });
