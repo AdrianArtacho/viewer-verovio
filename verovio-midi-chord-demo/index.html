@@ -54,10 +54,10 @@
 
 <body>
 
-<!-- Title (conditionally shown) -->
+<!-- Title (optional, URL-controlled) -->
 <h2 id="title" style="display:none"></h2>
 
-<!-- Debug controls (conditionally shown) -->
+<!-- Debug controls (optional, URL-controlled) -->
 <div class="controls" id="debug-controls" style="display:none">
   <button onclick="advanceStep()">Next (debug)</button>
 </div>
@@ -88,7 +88,7 @@ const MIDI_CHANNEL = Math.max(0, MIDI_CHANNEL_1BASED - 1);
 const MIDI_IN_MATCH  = params.get("midiIn")  || "Max→Browser";
 const MIDI_OUT_MATCH = params.get("midiOut") || "Browser→Max";
 
-/* UI-related params */
+/* UI params */
 const DEBUG_MODE = params.get("debug") === "yes";
 const TITLE_TEXT = params.get("title");
 
@@ -111,14 +111,13 @@ if (TITLE_TEXT && TITLE_TEXT.trim() !== "") {
 const vrvToolkit = new verovio.toolkit();
 
 let steps = [];
-let currentStep = 0;
+let currentStep = -1;
 let analysisData = null;
 let globalBaselineY = null;
 
 let midiOut = null;
 let lastPlayedNotes = [];
 
-/* readiness handshake */
 let stepsReady = false;
 let midiReady  = false;
 
@@ -142,7 +141,7 @@ fetch(SCORE_PATH)
     stepsReady = true;
     maybeSendStepCount();
 
-    renderStep();
+    clearSelection(); // default state = no highlight
   });
 
 /* =====================================================
@@ -152,12 +151,11 @@ fetch(ANALYSIS_PATH)
   .then(r => r.json())
   .then(json => {
     analysisData = json;
-    renderStep();
   })
   .catch(() => console.log("No analysis JSON (ok)"));
 
 /* =====================================================
-   BUILD MUSICAL STEPS
+   BUILD STEPS
 ===================================================== */
 function buildSteps() {
   steps = [];
@@ -186,15 +184,28 @@ function buildSteps() {
 }
 
 /* =====================================================
+   CLEAR SELECTION (CC 22 = 0)
+===================================================== */
+function clearSelection() {
+  document.querySelectorAll(".notehead")
+    .forEach(n => n.classList.remove("active"));
+
+  stopLastNotes();
+
+  document.getElementById("analysis-overlay").style.display = "none";
+  currentStep = -1;
+}
+
+/* =====================================================
    RENDER STEP
 ===================================================== */
 function renderStep() {
+  if (currentStep < 0 || currentStep >= steps.length) return;
+
   document.querySelectorAll(".notehead")
     .forEach(n => n.classList.remove("active"));
 
   const notes = steps[currentStep];
-  if (!notes) return;
-
   notes.forEach(n => n.classList.add("active"));
 
   renderAnalysisHTML(notes);
@@ -243,7 +254,7 @@ function renderAnalysisHTML(notes) {
 }
 
 /* =====================================================
-   PITCH VIA VEROVIO TOOLKIT
+   VEROVIO → MIDI PITCH
 ===================================================== */
 function getMidiPitch(notehead) {
   const note = notehead.closest(".note");
@@ -263,7 +274,7 @@ function getMidiPitch(notehead) {
 }
 
 /* =====================================================
-   MIDI OUTPUT HELPERS
+   MIDI HELPERS
 ===================================================== */
 function sendNoteOn(p, v = 90) {
   if (!midiOut) return;
@@ -324,7 +335,7 @@ function advanceStep() {
 }
 
 /* =====================================================
-   MIDI IN / OUT SETUP
+   MIDI SETUP
 ===================================================== */
 if (navigator.requestMIDIAccess) {
   navigator.requestMIDIAccess().then(midi => {
@@ -334,14 +345,19 @@ if (navigator.requestMIDIAccess) {
         console.log("BOUND INPUT:", input.name);
         input.onmidimessage = msg => {
           const [st, d1, d2] = msg.data;
+
           if ((st & 0xF0) === 0xB0 &&
               (st & 0x0F) === MIDI_CHANNEL &&
               d1 === CC_STEP_SELECT) {
 
-            const idx = d2 - 1;
-            if (idx >= 0 && idx < steps.length) {
-              currentStep = idx;
-              renderStep();
+            if (d2 === 0) {
+              clearSelection();
+            } else {
+              const idx = d2 - 1;
+              if (idx >= 0 && idx < steps.length) {
+                currentStep = idx;
+                renderStep();
+              }
             }
           }
         };
