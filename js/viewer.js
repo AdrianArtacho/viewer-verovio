@@ -181,6 +181,7 @@ function notifyParentOfHeight() {
 window.addEventListener("resize", () => {
   // If the viewer resizes (Reveal, fullscreen, etc), baseline must be recomputed
   globalBaselineY = null;
+  fitScoreToViewerWidth();
   repositionOverlayForCurrentStep();
   notifyParentOfHeight();
 });
@@ -325,6 +326,26 @@ function positionOverlayAtStep(index) {
   }
 }
 
+function fitScoreToViewerWidth() {
+  const svg = scoreDiv.querySelector("svg");
+  if (!svg) return;
+
+  const viewerWidth = viewerDiv.clientWidth;
+  const svgBBox = svg.getBBox();
+
+  if (!svgBBox.width || !viewerWidth) return;
+
+  // target: leave a little margin
+  const margin = 20;
+  const scaleFactor = (viewerWidth - margin) / svgBBox.width;
+
+  if (scaleFactor > 0) {
+    svg.style.transformOrigin = "0 0";
+    svg.style.transform = `scale(${scaleFactor})`;
+  }
+}
+
+
 /* =========================================================
    MIDI
    ========================================================= */
@@ -419,6 +440,7 @@ window.addEventListener("message", event => {
 
     // ensure size correct
     requestAnimationFrame(() => {
+      fitScoreToViewerWidth();
       notifyParentOfHeight();
     });
   }
