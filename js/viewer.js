@@ -1,5 +1,5 @@
 /* =========================================================
-   Harmony Viewer – viewer.js (chord-safe + no scrollbars)
+   Harmony Viewer – HTML analysis overlay (global baseline)
    ========================================================= */
 
 "use strict";
@@ -11,10 +11,25 @@ const SCORE_URL = params.get("score");
 const DEBUG = params.get("debug") === "yes";
 const TITLE = params.get("title") || "";
 
+/* analysis.json defaults next to score */
+function defaultAnalysisUrl(scoreUrl) {
+  if (!scoreUrl) return null;
+  try {
+    const u = new URL(scoreUrl, window.location.href);
+    u.hash = "";
+    u.pathname = u.pathname.replace(/\.(musicxml|xml)$/i, ".json");
+    return u.toString();
+  } catch {
+    return scoreUrl.replace(/\.(musicxml|xml)$/i, ".json");
+  }
+}
+
+const ANALYSIS_URL = params.get("analysis") || defaultAnalysisUrl(SCORE_URL);
+
 /* MIDI config */
-const CC_SELECT = Number(params.get("ccSelect") || 22); // select step
+const CC_SELECT = Number(params.get("ccSelect") || 22); // select step (0 clears)
 const CC_COUNT  = Number(params.get("ccCount")  || 23); // step count
-const CC_SLIDE = Number(params.get("ccSlide") || 24);
+const CC_SLIDE  = Number(params.get("ccSlide")  || 24); // slide index
 
 const MIDI_IN_NAME  = params.get("midiIn")  || "Max→Browser";
 const MIDI_OUT_NAME = params.get("midiOut") || "Browser→Max";
@@ -25,6 +40,11 @@ const titleDiv = document.getElementById("title");
 const debugControls = document.getElementById("debug-controls");
 const debugBtn = document.getElementById("nextBtn");
 
+const viewerDiv = document.getElementById("viewer");
+const overlay = document.getElementById("analysis-overlay");
+const overlayStufe = overlay.querySelector(".analysis-stufe");
+const overlayFunc  = overlay.querySelector(".analysis-function");
+
 /* ---------- UI ---------- */
 if (TITLE) {
   titleDiv.textContent = TITLE;
@@ -33,11 +53,7 @@ if (TITLE) {
   titleDiv.hidden = true;
 }
 
-if (DEBUG) {
-  debugControls.hidden = false;
-} else {
-  debugControls.hidden = true;
-}
+debugControls.hidden = !DEBUG;
 
 /* ---------- Guard ---------- */
 if (!SCORE_URL) {
@@ -54,11 +70,6 @@ if (typeof verovio === "undefined") {
 
 /* ---------- Verovio ---------- */
 const vrv = new verovio.toolkit();
-
-/* IMPORTANT:
-   - removed ignoreLayout (your build doesn't support it)
-   - keep options conservative + supported
-*/
 vrv.setOptions({
   scale: 40,
   pageWidth: 3000,
@@ -69,14 +80,18 @@ vrv.setOptions({
 });
 
 /* ---------- State ---------- */
-let steps = [];          // array of arrays of NOTEHEAD <use> elements
+let steps = [];            // array of arrays of NOTEHEAD <use> elements
 let currentStep = 0;
+
+let analysisData = null;   // normalized to { steps:[...] }
 
 let midiIn = null;
 let midiOut = null;
-
 let stepsReady = false;
 let midiReady  = false;
+
+/* global baseline in VIEWER pixel coordinates */
+let globalBaselineY = null;
 
 /* =========================================================
    Load score
@@ -86,23 +101,26 @@ fetch(SCORE_URL)
     if (!r.ok) throw new Error("Failed to load score: " + SCORE_URL);
     return r.text();
   })
-  .then(xml => {
+  .then(async xml => {
     vrv.loadData(xml);
 
     renderScore();
     extractStepsChordSafe();
+
+    await loadAnalysis();
 
     stepsReady = true;
     if (DEBUG) console.log("Total harmonic steps:", steps.length);
 
     initMIDI();
 
-    // default state: nothing highlighted
+    // default: highlight nothing
     highlightStep(0);
 
-    // resize once more after layout settles
+    // settle layout -> size + (re)position overlay if needed
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => notifyParentOfHeight());
+      notifyParentOfHeight();
+      repositionOverlayForCurrentStep();
     });
   })
   .catch(err => {
@@ -111,45 +129,68 @@ fetch(SCORE_URL)
   });
 
 /* =========================================================
+   Load analysis JSON (optional) + normalize
+   ========================================================= */
+async function loadAnalysis() {
+  analysisData = null;
+  if (!ANALYSIS_URL) {
+    if (DEBUG) console.log("No analysis URL (analysis disabled).");
+    return;
+  }
+
+  try {
+    const r = await fetch(ANALYSIS_URL, { cache: "no-store" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+
+    const raw = await r.json();
+    analysisData = Array.isArray(raw) ? { steps: raw } : raw;
+
+    if (!analysisData?.steps || !Array.isArray(analysisData.steps)) {
+      console.warn("Analysis JSON shape unexpected. Expected {steps:[...]} or [...].");
+      analysisData = null;
+      return;
+    }
+
+    if (DEBUG) console.log("Loaded analysis JSON:", analysisData);
+  } catch (e) {
+    if (DEBUG) console.log("No analysis JSON / failed:", ANALYSIS_URL, e);
+    analysisData = null;
+  }
+}
+
+/* =========================================================
    Render + iframe resize
    ========================================================= */
 function renderScore() {
   scoreDiv.innerHTML = vrv.renderToSVG(1);
-  notifyParentOfHeight();
 }
 
 function notifyParentOfHeight() {
   const svg = scoreDiv.querySelector("svg");
   if (!svg) return;
 
-  // bbox is in SVG units; height here matches rendered content better than scrollHeight
-  let height = 0;
+  let height = document.body.scrollHeight;
   try {
     const bbox = svg.getBBox();
-    height = Math.ceil(bbox.y + bbox.height);
-  } catch {
-    // fallback
-    height = document.body.scrollHeight;
-  }
-
-  // also force the viewer to be non-scrollable internally
-  document.documentElement.style.overflow = "hidden";
-  document.body.style.overflow = "hidden";
+    height = Math.ceil(bbox.y + bbox.height) + 60; // some padding for overlay text
+  } catch {}
 
   window.parent?.postMessage({ type: "harmony-resize", height }, "*");
 }
 
 window.addEventListener("resize", () => {
+  // If the viewer resizes (Reveal, fullscreen, etc), baseline must be recomputed
+  globalBaselineY = null;
+  repositionOverlayForCurrentStep();
   notifyParentOfHeight();
 });
 
 /* =========================================================
-   Step extraction (CHORD-SAFE) – restores your correct logic
-   =========================================================
+   Step extraction (CHORD-SAFE)
    A step is:
-   1) a <g class="chord"> (atomic)
-   2) OR a standalone <g class="note"> that is NOT inside a chord
-*/
+   1) <g class="chord">  (atomic)
+   2) OR a standalone <g class="note"> not inside a chord
+   ========================================================= */
 function extractStepsChordSafe() {
   steps = [];
 
@@ -167,19 +208,14 @@ function extractStepsChordSafe() {
 
   allSteps.forEach(el => {
     const noteheads = el.querySelectorAll(".notehead use");
-    if (noteheads.length > 0) {
-      steps.push([...noteheads]);
-    }
+    if (noteheads.length > 0) steps.push([...noteheads]);
   });
 }
 
 /* =========================================================
-   Highlighting
+   Highlighting (SVG noteheads)
    ========================================================= */
-const HIGHLIGHT_COLOR = "#d00"; // red-ish
-
 function clearHighlight() {
-  // remove class + explicit attributes (both, for robustness across SVG styles)
   scoreDiv.querySelectorAll(".hv-highlight").forEach(el => {
     el.classList.remove("hv-highlight");
     el.removeAttribute("fill");
@@ -188,32 +224,106 @@ function clearHighlight() {
 }
 
 function highlightStep(index) {
+  if (DEBUG) console.log("[highlightStep]", index);
+
   clearHighlight();
 
   if (index <= 0 || index > steps.length) {
     currentStep = 0;
+    hideOverlay();
     return;
   }
 
   const useEls = steps[index - 1];
   useEls.forEach(u => {
     u.classList.add("hv-highlight");
-    // make it work even when CSS isn't applied to <use>
-    u.setAttribute("fill", HIGHLIGHT_COLOR);
-    u.setAttribute("color", HIGHLIGHT_COLOR);
+    u.setAttribute("fill", "#d00");
+    u.setAttribute("color", "#d00");
   });
 
   currentStep = index;
+  updateOverlayForStep(index);
 }
 
-/* inject tiny CSS for highlight (SVG + safety) */
-(function injectHighlightCSS() {
-  const style = document.createElement("style");
-  style.textContent = `
-    .hv-highlight { fill: ${HIGHLIGHT_COLOR} !important; color: ${HIGHLIGHT_COLOR} !important; }
-  `;
-  document.head.appendChild(style);
-})();
+/* =========================================================
+   HTML overlay (global baseline)
+   ========================================================= */
+function hideOverlay() {
+  overlay.hidden = true;
+  overlay.classList.remove("active");
+  overlay.classList.add("inactive");
+}
+
+function updateOverlayForStep(index) {
+  if (!analysisData?.steps?.[index - 1]) {
+    hideOverlay();
+    return;
+  }
+
+  const a = analysisData.steps[index - 1];
+  overlayStufe.textContent = a.stufe || "";
+  overlayFunc.textContent  = a.function || "";
+
+  overlay.hidden = false;
+  overlay.classList.add("active");
+  overlay.classList.remove("inactive");
+
+  // (re)compute global baseline once (first time we show overlay)
+  if (globalBaselineY === null) {
+    const bbox = getStepScreenBBox(index);
+    if (bbox) {
+      const viewerRect = viewerDiv.getBoundingClientRect();
+      globalBaselineY = (bbox.maxY - viewerRect.top) + 10;
+      if (DEBUG) console.log("[analysis] computed globalBaselineY:", globalBaselineY);
+    }
+  }
+
+  positionOverlayAtStep(index);
+}
+
+function repositionOverlayForCurrentStep() {
+  if (currentStep > 0) {
+    updateOverlayForStep(currentStep);
+  }
+}
+
+/* Get step bbox in SCREEN pixels */
+function getStepScreenBBox(index) {
+  const useEls = steps[index - 1];
+  if (!useEls || !useEls.length) return null;
+
+  let minX = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+  for (const u of useEls) {
+    const r = u.getBoundingClientRect();
+    if (!isFinite(r.left) || !isFinite(r.right) || !isFinite(r.bottom)) continue;
+    minX = Math.min(minX, r.left);
+    maxX = Math.max(maxX, r.right);
+    maxY = Math.max(maxY, r.bottom);
+  }
+
+  if (!isFinite(minX) || !isFinite(maxX) || !isFinite(maxY)) return null;
+  return { minX, maxX, maxY };
+}
+
+function positionOverlayAtStep(index) {
+  const bbox = getStepScreenBBox(index);
+  if (!bbox) return;
+
+  const viewerRect = viewerDiv.getBoundingClientRect();
+  const centerX = (bbox.minX + bbox.maxX) / 2;
+
+  const xInViewer = centerX - viewerRect.left;
+  const yInViewer = (globalBaselineY !== null) ? globalBaselineY : (bbox.maxY - viewerRect.top + 10);
+
+  overlay.style.left = `${xInViewer}px`;
+  overlay.style.top  = `${yInViewer}px`;
+
+  if (DEBUG && analysisData?.steps?.[index - 1]) {
+    const a = analysisData.steps[index - 1];
+    console.log(`Step ${index}:`, a.stufe || "", a.function || "");
+  }
+}
 
 /* =========================================================
    MIDI
@@ -226,7 +336,7 @@ function initMIDI() {
 
   navigator.requestMIDIAccess().then(access => {
     // inputs
-    for (let input of access.inputs.values()) {
+    for (const input of access.inputs.values()) {
       if (input.name.includes(MIDI_IN_NAME)) {
         midiIn = input;
         midiIn.onmidimessage = handleMIDIIn;
@@ -235,7 +345,7 @@ function initMIDI() {
     }
 
     // outputs
-    for (let output of access.outputs.values()) {
+    for (const output of access.outputs.values()) {
       if (output.name.includes(MIDI_OUT_NAME)) {
         midiOut = output;
         midiReady = true;
@@ -244,27 +354,21 @@ function initMIDI() {
       }
     }
 
-    if (!midiOut && DEBUG) console.warn("No MIDI OUT found matching:", MIDI_OUT_NAME);
-    if (!midiIn  && DEBUG) console.warn("No MIDI IN found matching:", MIDI_IN_NAME);
-
-    // Even if MIDI isn't ready yet, steps might be ready — try anyway.
     maybeSendStepCount();
   });
 }
 
 function handleMIDIIn(e) {
   const [status, cc, value] = e.data;
-  if ((status & 0xf0) !== 0xb0) return; // only CC
+  if ((status & 0xf0) !== 0xb0) return; // CC only
 
   if (cc === CC_SELECT) {
-    // value 0 clears highlight
+    // value 0 clears highlight + overlay
     highlightStep(value);
   }
 }
 
-/* =========================================================
-   Step count CC23 – on load + on Reveal slide visible
-   ========================================================= */
+/* Step count CC23 */
 function maybeSendStepCount() {
   if (!stepsReady || !midiReady) return;
   sendStepCount();
@@ -272,28 +376,19 @@ function maybeSendStepCount() {
 
 function sendStepCount() {
   if (!midiOut) return;
-
   const value = Math.min(127, steps.length);
   midiOut.send([0xb0, CC_COUNT, value]);
-
   if (DEBUG) console.log(`Sent step count (CC${CC_COUNT}):`, value);
 }
 
 function sendSlideIndex(index) {
   if (!midiOut) return;
-
   const value = Math.max(0, Math.min(127, index));
-  midiOut.send([0xB0, CC_SLIDE, value]);
-
-  if (DEBUG) {
-    console.log(`Sent slide index (CC${CC_SLIDE}):`, value);
-  }
+  midiOut.send([0xb0, CC_SLIDE, value]);
+  if (DEBUG) console.log(`Sent slide index (CC${CC_SLIDE}):`, value);
 }
 
-
-/* =========================================================
-   Debug button
-   ========================================================= */
+/* Debug button */
 if (debugBtn) {
   debugBtn.onclick = () => {
     let next = currentStep + 1;
@@ -307,29 +402,24 @@ if (debugBtn) {
    ========================================================= */
 window.addEventListener("message", event => {
   const d = event.data;
-
-  // your plugin sends { type: 'reveal-slide-visible' }
   if (d && d.type === "reveal-slide-visible") {
-    if (DEBUG) {
-        console.log(
-        "Reveal slide visible:",
-        d.slideIndex
-        );
-    }
+    if (DEBUG) console.log("Reveal slide visible:", d.slideIndex);
 
-    // Send slide index FIRST
-    if (typeof d.slideIndex === "number") {
-        sendSlideIndex(d.slideIndex);
-    }
+    // slide index -> Max
+    if (typeof d.slideIndex === "number") sendSlideIndex(d.slideIndex);
 
-    // Then send step count
+    // count -> Max
     maybeSendStepCount();
 
-    // Reset highlight on entry
+    // reset highlight on entry
     highlightStep(0);
 
-    // Ensure iframe height is correct
-    notifyParentOfHeight();
-  }
+    // baseline will be recomputed on first highlight
+    globalBaselineY = null;
 
+    // ensure size correct
+    requestAnimationFrame(() => {
+      notifyParentOfHeight();
+    });
+  }
 });

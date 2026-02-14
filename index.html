@@ -1,28 +1,35 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Harmony Viewer</title>
 
   <link rel="stylesheet" href="./css/viewer.css" />
+
+  <!-- Local Verovio (offline-friendly) -->
+  <script src="./js/verovio-toolkit.js"></script>
 </head>
 
 <body>
-  <div id="app">
-    <div id="title" hidden></div>
+  <!-- Optional title (URL param: title=...) -->
+  <h2 id="title" hidden></h2>
 
-    <div id="debug-controls" hidden>
-      <button id="nextBtn" type="button">Next (debug)</button>
-    </div>
-
-    <div id="score"></div>
+  <!-- Optional debug controls (URL param: debug=yes) -->
+  <div class="controls" id="debug-controls" hidden>
+    <button id="nextBtn" type="button">Next (debug)</button>
   </div>
 
-  <!-- Verovio (LOCAL copy) -->
-  <script src="./js/verovio-toolkit.js"></script>
+  <div id="viewer">
+    <div id="score"></div>
 
-  <!-- Your app logic -->
+    <!-- HTML overlay (no touching the SVG) -->
+    <div id="analysis-overlay" hidden>
+      <div class="analysis-stufe"></div>
+      <div class="analysis-function"></div>
+    </div>
+  </div>
+
   <script src="./js/viewer.js"></script>
 </body>
 </html>

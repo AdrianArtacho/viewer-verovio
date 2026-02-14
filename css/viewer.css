@@ -1,39 +1,69 @@
-/* viewer.css */
-
-html,
-body {
+/* Base */
+html, body {
   margin: 0;
   padding: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
+  font-family: system-ui, sans-serif;
   background: white;
-  font-family: sans-serif;
 }
 
-#viewer-root {
+/* Keep it neat for embedding */
+body {
+  padding: 12px;
+}
+
+.controls {
+  margin: 0 0 10px 0;
+}
+
+#viewer {
   position: relative;
+  display: inline-block;
+  width: 100%;
+}
+
+/* Let SVG scale naturally inside container */
+#score svg {
   width: 100%;
   height: auto;
-  overflow: hidden;
+  display: block;
 }
 
-#score {
-  width: 100%;
-  overflow: hidden;
+/* Note highlight */
+.hv-highlight {
+  fill: #d00 !important;
+  color: #d00 !important;
 }
 
-/* Optional title */
-#title {
+/* -------- Analysis HTML overlay -------- */
+#analysis-overlay {
+  position: absolute;
+  pointer-events: none;
   text-align: center;
-  font-size: 1.5em;
-  margin: 0.5em 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  z-index: 10;
 }
 
-/* Debug button (hidden unless debug=yes) */
-#debug-controls {
-  position: fixed;
-  top: 10px;
-  left: 10px;
-  z-index: 10;
+.analysis-stufe {
+  font-family: "Times New Roman", "Palatino Linotype", serif;
+  font-size: 28px;
+  font-weight: bold;
+  line-height: 1.0;
+}
+
+.analysis-function {
+  font-family: system-ui, sans-serif;
+  font-size: 16px;
+  letter-spacing: 0.05em;
+  line-height: 1.0;
+}
+
+#analysis-overlay.inactive .analysis-stufe,
+#analysis-overlay.inactive .analysis-function {
+  color: #555;
+}
+
+#analysis-overlay.active .analysis-stufe,
+#analysis-overlay.active .analysis-function {
+  color: #d00;
 }

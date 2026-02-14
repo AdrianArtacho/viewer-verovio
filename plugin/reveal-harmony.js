@@ -48,4 +48,16 @@
   // Expose plugin for Reveal.initialize(...)
   window.RevealHarmony = RevealHarmony;
 
+    const style = document.createElement("style");
+    style.textContent = `
+    iframe[data-harmony] {
+        border: 0 !important;
+        outline: none !important;
+        box-shadow: none !important;
+        background: transparent !important;
+    }
+    `;
+    document.head.appendChild(style);
+
+
 })();
