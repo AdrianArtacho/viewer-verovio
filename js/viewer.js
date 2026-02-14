@@ -14,6 +14,7 @@ const TITLE = params.get("title") || "";
 /* MIDI config */
 const CC_SELECT = Number(params.get("ccSelect") || 22); // select step
 const CC_COUNT  = Number(params.get("ccCount")  || 23); // step count
+const CC_SLIDE = Number(params.get("ccSlide") || 24);
 
 const MIDI_IN_NAME  = params.get("midiIn")  || "Max→Browser";
 const MIDI_OUT_NAME = params.get("midiOut") || "Browser→Max";
@@ -278,6 +279,18 @@ function sendStepCount() {
   if (DEBUG) console.log(`Sent step count (CC${CC_COUNT}):`, value);
 }
 
+function sendSlideIndex(index) {
+  if (!midiOut) return;
+
+  const value = Math.max(0, Math.min(127, index));
+  midiOut.send([0xB0, CC_SLIDE, value]);
+
+  if (DEBUG) {
+    console.log(`Sent slide index (CC${CC_SLIDE}):`, value);
+  }
+}
+
+
 /* =========================================================
    Debug button
    ========================================================= */
@@ -297,9 +310,26 @@ window.addEventListener("message", event => {
 
   // your plugin sends { type: 'reveal-slide-visible' }
   if (d && d.type === "reveal-slide-visible") {
-    if (DEBUG) console.log("Reveal says slide visible → resend CC count + resize");
+    if (DEBUG) {
+        console.log(
+        "Reveal slide visible:",
+        d.slideIndex
+        );
+    }
+
+    // Send slide index FIRST
+    if (typeof d.slideIndex === "number") {
+        sendSlideIndex(d.slideIndex);
+    }
+
+    // Then send step count
     maybeSendStepCount();
-    highlightStep(0);           // reset highlight on entry
-    notifyParentOfHeight();     // ensure iframe gets correct height
+
+    // Reset highlight on entry
+    highlightStep(0);
+
+    // Ensure iframe height is correct
+    notifyParentOfHeight();
   }
+
 });

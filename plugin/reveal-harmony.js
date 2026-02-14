@@ -1,9 +1,7 @@
 /*!
  * Reveal Harmony Plugin
- * Sends activation messages ONLY to harmony iframes
- * in the currently active slide.
- *
- * Classic script (no ES modules)
+ * - Notifies ONLY the active slide's harmony iframes
+ * - Sends slide index to viewer
  */
 
 (function () {
@@ -17,7 +15,10 @@
       function notifySlide(slide) {
         if (!slide) return;
 
-        // Only harmony iframes INSIDE the current slide
+        // Horizontal slide index (Reveal v4)
+        const indices = reveal.getIndices(slide);
+        const slideIndex = indices?.h ?? 0;
+
         const iframes = slide.querySelectorAll("iframe[data-harmony]");
         if (!iframes.length) return;
 
@@ -25,7 +26,10 @@
           if (!iframe.contentWindow) return;
 
           iframe.contentWindow.postMessage(
-            { type: "reveal-slide-visible" },
+            {
+              type: "reveal-slide-visible",
+              slideIndex
+            },
             "*"
           );
         });
@@ -41,7 +45,7 @@
     }
   };
 
-  // 👇 THIS is what Reveal v4 needs
+  // Expose plugin for Reveal.initialize(...)
   window.RevealHarmony = RevealHarmony;
 
 })();

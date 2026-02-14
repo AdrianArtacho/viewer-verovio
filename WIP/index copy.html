@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Harmony + Reveal</title>
+
+<link rel="stylesheet" href="reveal/dist/reveal.css">
+<link rel="stylesheet" href="reveal/dist/theme/white.css">
+
+<style>
+iframe.harmony-viewer {
+  width: 100%;
+  border: none;
+}
+</style>
+</head>
+
+<body>
+
+<div class="reveal">
+<div class="slides">
+
+<section>
+  <h2>Intro</h2>
+</section>
+
+<section>
+  <iframe
+    class="harmony-viewer"
+    src="viewer/index.html?score=../scores/demo2.musicxml">
+  </iframe>
+</section>
+
+<section
+  data-background-iframe="viewer/index.html?score=../scores/demo2.musicxml&fullscreen=yes"
+  data-background-interactive>
+</section>
+
+<section data-harmony-score="demo1.musicxml"></section>
+
+<section data-harmony-score="demo2.musicxml"></section>
+
+<section
+  data-harmony-score="demo2.musicxml"
+  data-harmony-fullscreen="yes">
+</section>
+
+<section
+  data-harmony-score="demo2.musicxml"
+  data-harmony-debug="yes"
+  data-harmony-title="Harmonic Analysis – Bach">
+</section>
+
+
+</div>
+</div>
+
+<script src="reveal/dist/reveal.js"></script>
+
+<script type="module">
+import Harmony from './viewer/plugin/reveal-harmony.js';
+
+Reveal.initialize({
+  hash: true,
+  plugins: [ Harmony ]
+});
+</script>
+
+
+<script>
+window.addEventListener("message", event => {
+  if (event.data?.type === "harmony-viewer-resize") {
+    const iframe = document.querySelector("iframe.harmony-viewer");
+    if (iframe) {
+      iframe.style.height = event.data.height + "px";
+    }
+  }
+});
+</script>
+
+
+</body>
+</html>
