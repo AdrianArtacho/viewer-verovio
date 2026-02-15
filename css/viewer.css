@@ -76,3 +76,7 @@ html, body {
   color: white;
   border-radius: 6px;
 }
+
+#debug-controls[hidden] {
+  display: none !important;
+}
