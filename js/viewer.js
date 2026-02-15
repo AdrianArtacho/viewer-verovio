@@ -10,6 +10,8 @@ const params = new URLSearchParams(window.location.search);
 const SCORE_URL = params.get("score");
 const DEBUG = params.get("debug") === "yes";
 const TITLE = params.get("title") || "";
+const ZOOM_PARAM = params.get("zoom") || "fit";
+
 
 /* analysis.json defaults next to score */
 function defaultAnalysisUrl(scoreUrl) {
@@ -44,6 +46,10 @@ const viewerDiv = document.getElementById("viewer");
 const overlay = document.getElementById("analysis-overlay");
 const overlayStufe = overlay.querySelector(".analysis-stufe");
 const overlayFunc  = overlay.querySelector(".analysis-function");
+
+const zoomIndicator = document.getElementById("zoom-indicator");
+if (zoomIndicator) zoomIndicator.hidden = !DEBUG;
+
 
 /* ---------- UI ---------- */
 if (TITLE) {
@@ -181,10 +187,17 @@ function notifyParentOfHeight() {
 window.addEventListener("resize", () => {
   // If the viewer resizes (Reveal, fullscreen, etc), baseline must be recomputed
   globalBaselineY = null;
-  fitScoreToViewerWidth();
+  applyScoreZoom();
   repositionOverlayForCurrentStep();
   notifyParentOfHeight();
 });
+
+function updateZoomIndicator(info) {
+  if (!DEBUG || !zoomIndicator) return;
+
+  zoomIndicator.hidden = false;
+  zoomIndicator.textContent = info;
+}
 
 /* =========================================================
    Step extraction (CHORD-SAFE)
@@ -326,24 +339,72 @@ function positionOverlayAtStep(index) {
   }
 }
 
-function fitScoreToViewerWidth() {
+function applyScoreZoom() {
   const svg = scoreDiv.querySelector("svg");
   if (!svg) return;
 
+  svg.style.transformOrigin = "0 0";
+
+  // Case 1: no zoom at all
+  if (ZOOM_PARAM === "none") {
+    svg.style.transform = "";
+    return;
+  }
+
+  // Case 2: manual numeric zoom
+  const numericZoom = parseFloat(ZOOM_PARAM);
+  if (!isNaN(numericZoom) && numericZoom > 0) {
+    svg.style.transform = `scale(${numericZoom})`;
+    return;
+  }
+
+  // Case 3: default = fit width
   const viewerWidth = viewerDiv.clientWidth;
-  const svgBBox = svg.getBBox();
+  let svgWidth;
 
-  if (!svgBBox.width || !viewerWidth) return;
+  try {
+    svgWidth = svg.getBBox().width;
+  } catch {
+    svgWidth = svg.clientWidth;
+  }
 
-  // target: leave a little margin
+  if (!svgWidth || !viewerWidth) return;
+
   const margin = 20;
-  const scaleFactor = (viewerWidth - margin) / svgBBox.width;
+  const scaleFactor = (viewerWidth - margin) / svgWidth;
 
   if (scaleFactor > 0) {
-    svg.style.transformOrigin = "0 0";
     svg.style.transform = `scale(${scaleFactor})`;
   }
+  // --- DEBUG ZOOM INDICATOR ---
+  if (DEBUG) {
+    const viewerW = viewerDiv.clientWidth;
+
+    let svgW = 0;
+    try {
+      svgW = svg.getBBox().width;
+    } catch {
+      svgW = svg.clientWidth;
+    }
+
+    const appliedScale = svg.style.transform
+      ? parseFloat(svg.style.transform.match(/scale\(([^)]+)\)/)?.[1])
+      : 1;
+
+    let modeLabel = ZOOM_PARAM;
+    if (ZOOM_PARAM === "fit") modeLabel = "fit";
+    else if (ZOOM_PARAM === "none") modeLabel = "none";
+    else if (!isNaN(parseFloat(ZOOM_PARAM))) modeLabel = `${ZOOM_PARAM} (manual)`;
+
+    updateZoomIndicator(
+      `ZOOM: ${modeLabel}\n` +
+      `scale: ${appliedScale?.toFixed(2) || "1.00"}\n` +
+      `viewer: ${viewerW}px\n` +
+      `svg: ${Math.round(svgW)}px`
+    );
+  }
 }
+
 
 
 /* =========================================================
@@ -440,7 +501,7 @@ window.addEventListener("message", event => {
 
     // ensure size correct
     requestAnimationFrame(() => {
-      fitScoreToViewerWidth();
+      applyScoreZoom();
       notifyParentOfHeight();
     });
   }
