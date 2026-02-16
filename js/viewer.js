@@ -41,6 +41,8 @@
   const OUT_PORT_HINT = params.get("out") || "browser->max";
 
   const IS_EMBEDDED = window.self !== window.top;
+  const FUNCTION_OFFSET_Y = 22; // px, adjust to taste
+
 
   // ---------------------------
   // DOM
@@ -321,6 +323,7 @@
     }
   }
 
+  
   function updateAnalysisOverlay(stepIndex) {
     if (!elOverlay || !elStufe || !elFunc) return;
 
@@ -374,7 +377,16 @@
 
     elOverlay.style.left = `${left}px`;
     elOverlay.style.top = `${top}px`;
+
+    // ✅ Stack function below Stufe
+    elStufe.style.left = "0px";
+    elStufe.style.top = "0px";
+
+    elFunc.style.left = "0px";
+    elFunc.style.top = `${FUNCTION_OFFSET_Y}px`;
+
     elOverlay.hidden = false;
+
   }
 
   function computeGlobalAnalysisBaselineY() {
