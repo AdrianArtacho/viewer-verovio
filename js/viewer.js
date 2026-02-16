@@ -75,6 +75,8 @@
 
   // analysis JSON: { title, steps:[ { stufe, function, ... }, ... ] }
   let analysis = null;
+  let globalAnalysisBaselineY = null;
+
 
   // activation gating (important for embeds!)
   let isActiveViewer = !IS_EMBEDDED; // standalone = active by default
@@ -358,7 +360,13 @@
       rects.reduce((s, r) => s + (r.left + r.right) / 2, 0) / rects.length;
 
     // Use your global baseline Y (already computed elsewhere)
-    const baselineY = window.__HV_GLOBAL_BASELINE_Y || rects[0].bottom;
+    if (!globalAnalysisBaselineY) {
+      elOverlay.hidden = true;
+      return;
+    }
+
+    const baselineY = globalAnalysisBaselineY;
+
 
     // Convert screen → viewer coordinates
     const left = cx - viewerRect.left;
@@ -368,6 +376,27 @@
     elOverlay.style.top = `${top}px`;
     elOverlay.hidden = false;
   }
+
+  function computeGlobalAnalysisBaselineY() {
+    const svg = elScore.querySelector("svg");
+    if (!svg) return null;
+
+    const noteheads = svg.querySelectorAll(".notehead, g.note");
+    let maxBottom = -Infinity;
+
+    for (const nh of noteheads) {
+      const rect = nh.getBoundingClientRect();
+      if (rect.bottom > maxBottom) {
+        maxBottom = rect.bottom;
+      }
+    }
+
+    if (!isFinite(maxBottom)) return null;
+
+    // Padding below the lowest notehead (adjust if needed)
+    return maxBottom + 10;
+  }
+
 
 
   // ---------------------------
@@ -667,9 +696,18 @@
       // ✅ CC23 now always has the correct value
       sendStepCountCc();
 
-      // Fit + notify
+      // Fit first (important!)
       applySvgFitToContainer();
+
+      // ✅ Compute ONE shared baseline AFTER fit
+      globalAnalysisBaselineY = computeGlobalAnalysisBaselineY();
+
+      if (DEBUG) {
+        console.log("[analysis] global baseline Y:", globalAnalysisBaselineY);
+      }
+
       notifyParentOfHeight();
+
     });
   }
 
