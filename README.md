@@ -141,6 +141,14 @@ The viewer uses **Web MIDI** and communicates via **virtual MIDI ports** (e.g. m
 * Notes are sent **only for the active viewer**
 * Previous slides are muted automatically
 
+
+### MIDI within Live
+
+| Message         | Meaning                               |
+| --------------- | ------------------------------------- |
+| **CC25**        | CC in to highlight a specific step    |
+| **CC26**        | CC out, towards META_scene            |
+
 ---
 
 ## Virtual MIDI ports (macOS example)

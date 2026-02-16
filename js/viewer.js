@@ -41,7 +41,7 @@
   const OUT_PORT_HINT = params.get("out") || "browser->max";
 
   const IS_EMBEDDED = window.self !== window.top;
-  const FUNCTION_OFFSET_Y = 40; // px, adjust to taste
+  const FUNCTION_OFFSET_Y = 25; // px, adjust to taste
 
 
   // ---------------------------
