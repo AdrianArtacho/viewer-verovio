@@ -16,7 +16,6 @@
       ------------------------------------------------- */
       const style = document.createElement("style");
       style.textContent = `
-        /* Prevent Reveal from clipping Harmony slides */
         .reveal,
         .reveal .slides {
           overflow: visible !important;
@@ -35,7 +34,6 @@
           display: block;
         }
 
-        /* Disable Reveal vertical centering on harmony slides */
         section[data-harmony-slide] {
           display: block !important;
         }
@@ -49,10 +47,24 @@
         return Array.from(document.querySelectorAll("iframe[data-harmony]"));
       }
 
-      function activateCurrentIframe() {
-        const current = deck.getCurrentSlide();
+      function computeSlideIndex(event) {
+        // Prefer event indices if available
+        if (event && typeof event.indexh === "number") {
+          const h = event.indexh;
+          const v = typeof event.indexv === "number" ? event.indexv : 0;
+          return h * 100 + v;
+        }
+
+        // Fallback to deck state
         const indices = deck.getIndices();
-        const slideIndex = indices && typeof indices.h === "number" ? indices.h : 0;
+        const h = indices.h || 0;
+        const v = indices.v || 0;
+        return h * 100 + v;
+      }
+
+      function activateCurrentIframe(event) {
+        const current = deck.getCurrentSlide();
+        const slideIndex = computeSlideIndex(event);
 
         for (const iframe of getHarmonyIframes()) {
           if (!iframe.contentWindow) continue;
@@ -61,7 +73,7 @@
 
           iframe.contentWindow.postMessage(
             {
-              type: isActive ? "activate" : "deactivate",
+              type: isActive ? "harmony-activate" : "harmony-deactivate",
               slideIndex
             },
             "*"
@@ -81,10 +93,10 @@
       /* -------------------------------------------------
          Reveal lifecycle hooks
       ------------------------------------------------- */
-      deck.on("ready", activateCurrentIframe);
-      deck.on("slidechanged", activateCurrentIframe);
-      deck.on("fragmentshown", activateCurrentIframe);
-      deck.on("fragmenthidden", activateCurrentIframe);
+      deck.on("ready", (event) => activateCurrentIframe(event));
+      deck.on("slidechanged", (event) => activateCurrentIframe(event));
+      deck.on("fragmentshown", (event) => activateCurrentIframe(event));
+      deck.on("fragmenthidden", (event) => activateCurrentIframe(event));
 
       /* -------------------------------------------------
          Resize handling from viewer
@@ -102,22 +114,19 @@
         const height = Number(msg.height);
         if (!height || height <= 0) return;
 
-        // 1. Resize iframe
+        // Resize iframe
         iframe.style.height = `${height}px`;
 
-        // 2. Resize section itself (THIS IS THE KEY FIX)
+        // Resize section
         const section = iframe.closest("section");
         if (section) {
           section.style.height = `${height}px`;
           section.style.minHeight = `${height}px`;
           section.style.maxHeight = "none";
           section.style.overflow = "visible";
-
-          // Disable Reveal scaling transforms
           section.style.transform = "none";
         }
 
-        // 3. Force Reveal layout refresh
         if (typeof deck.layout === "function") {
           deck.layout();
         }

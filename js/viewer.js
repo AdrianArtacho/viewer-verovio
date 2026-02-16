@@ -444,10 +444,13 @@
 
   function sendStepCountCc() {
     if (!isActiveViewer) return;
-    // CC23: total steps
-    sendCC(23, harmonicSteps.length);
-    if (DEBUG) console.log("Sent step count (CC23):", harmonicSteps.length);
+
+    const count = harmonicSteps.length;
+    sendCC(23, count);
+
+    if (DEBUG) console.log("Sent step count (CC23):", count);
   }
+
 
   function sendSlideIndexCc(index) {
     if (!isActiveViewer) return;
@@ -483,7 +486,7 @@
   }
 
   function handleMidiMessage(ev) {
-    if (!isActiveViewer) return;
+    if (!isActiveViewer && IS_EMBEDDED) return; 
 
     const data = ev.data || [];
     const status = data[0] || 0;
@@ -541,13 +544,6 @@
     } else {
       warn("No MIDI output port found.");
     }
-
-    // Standalone: send step count once MIDI is ready
-    if (!IS_EMBEDDED) {
-      sendStepCountCc();
-      // CC24 for standalone (0)
-      sendSlideIndexCc(0);
-    }
   }
 
   // ---------------------------
@@ -571,6 +567,9 @@
     if (msg.type === "harmony-activate") {
       isActiveViewer = true;
       log("[viewer] activated");
+      
+      console.log("[viewer] ACTIVATED, slide:", currentSlideIndex); // temporary
+
       // send counts now that we are active
       sendStepCountCc();
       sendSlideIndexCc(currentSlideIndex);
@@ -625,25 +624,35 @@
     const svg = tk.renderToSVG(1);
     elScore.innerHTML = svg;
 
-    // Build steps + pitches
-    harmonicSteps = buildHarmonicStepsFromSvg();
-    console.log("Total harmonic steps:", harmonicSteps.length);
+    // ⏱ IMPORTANT: wait until SVG is actually in the DOM
+    requestAnimationFrame(async () => {
 
-    computeStepPitches();
+      // Build steps + pitches (NOW the SVG is queryable)
+      harmonicSteps = buildHarmonicStepsFromSvg();
+      console.log("Total harmonic steps:", harmonicSteps.length);
 
-    // Load analysis JSON if present
-    analysis = await loadAnalysisIfPresent(scoreUrl);
+      computeStepPitches();
 
-    // Initial highlight
-    highlightStep(0);
+      // Load analysis JSON if present
+      analysis = await loadAnalysisIfPresent(scoreUrl);
 
-    // 🔧 ADD THIS
-    sendStepCountCc();
+      // Initial highlight
+      highlightStep(0);
 
-    // Fit + notify
-    applySvgFitToContainer();
-    notifyParentOfHeight();
+      // ✅ Standalone activation
+      if (!IS_EMBEDDED) {
+        isActiveViewer = true;
+      }
+
+      // ✅ CC23 now always has the correct value
+      sendStepCountCc();
+
+      // Fit + notify
+      applySvgFitToContainer();
+      notifyParentOfHeight();
+    });
   }
+
 
   // Resize handling
   window.addEventListener("resize", () => {
